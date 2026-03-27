@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00ADD8"/>
+      <stop offset="100%" style="stop-color:#0090b8"/>
+    </linearGradient>
+    <filter id="s">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="30"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="80" fill="url(#bg)"/>
+
+  <!-- Subtle light patches -->
+  <ellipse cx="160" cy="200" rx="180" ry="160" fill="#33d6f0" opacity="0.12" filter="url(#s)"/>
+  <ellipse cx="380" cy="350" rx="150" ry="130" fill="#007a99" opacity="0.2" filter="url(#s)"/>
+
+  <!-- HTMX logo centered -->
+  <g transform="translate(64, 104) scale(16)" fill="#ffffff">
+    <path d="M0 13.01v-2l7.09-2.98.58 1.94-5.1 2.05 5.16 2.05-.63 1.9Zm16.37 1.03 5.18-2-5.16-2.09.65-1.88L24 10.95v2.12L17 16zm-2.85-9.98H16l-5.47 15.88H8.05Z"/>
+  </g>
+</svg>
