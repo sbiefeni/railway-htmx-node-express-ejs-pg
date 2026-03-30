@@ -169,21 +169,21 @@ This is one of 15 HTMX starter templates covering different backend stacks, all 
 
 | Stack | Status |
 |-------|--------|
-| Go + Echo | [Available](https://github.com/atoolz/railway-htmx-go-templ-echo-pg) |
-| Go + Fiber | Coming soon |
-| Go + Chi | Coming soon |
-| Python + FastAPI | Coming soon |
-| Python + Django | Coming soon |
-| Java + Spring Boot (PG) | Coming soon |
-| Java + Spring Boot (MySQL) | Coming soon |
-| PHP + Laravel | Coming soon |
-| **Node + Express** | This repo |
-| Ruby + Rails 8 | Coming soon |
-| .NET + Razor | Coming soon |
-| Rust + Axum | Coming soon |
-| Node + Hono | Coming soon |
 | Bun + Elysia | Coming soon |
+| .NET + Razor | Coming soon |
 | Elixir + Phoenix | Coming soon |
+| Go + Chi | [Live](https://github.com/atoolz/railway-htmx-go-templ-chi-pg) |
+| Go + Echo | [Live](https://github.com/atoolz/railway-htmx-go-templ-echo-pg) |
+| Go + Fiber | [Live](https://github.com/atoolz/railway-htmx-go-templ-fiber-pg) |
+| Java + Spring Boot (MySQL) | [Live](https://github.com/atoolz/railway-htmx-java-spring-thymeleaf-mysql) |
+| Java + Spring Boot (PostgreSQL) | [Live](https://github.com/atoolz/railway-htmx-java-spring-thymeleaf-pg) |
+| **Node + Express** | **This repo** |
+| Node + Hono | [Live](https://github.com/atoolz/railway-htmx-node-hono-jsx-pg) |
+| PHP + Laravel | [Live](https://github.com/atoolz/railway-htmx-php-laravel-mysql) |
+| Python + Django | [Live](https://github.com/atoolz/railway-htmx-python-django-pg) |
+| Python + FastAPI | [Live](https://github.com/atoolz/railway-htmx-python-fastapi-jinja2-pg) |
+| Ruby + Rails 8 | [Live](https://github.com/atoolz/railway-htmx-ruby-rails8-pg) |
+| Rust + Axum + Askama | [Live](https://github.com/atoolz/railway-htmx-rust-axum-askama-pg) |
 
 <br>
 
