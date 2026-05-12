@@ -7,11 +7,18 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
-  "keywords": ["htmx", "express", "ejs", "postgresql", "railway"],
+  "keywords": [
+    "htmx",
+    "express",
+    "ejs",
+    "postgresql",
+    "railway"
+  ],
   "license": "MIT",
   "dependencies": {
     "ejs": "^3.1.10",
     "express": "^5.1.0",
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "svix": "^1.93.0"
   }
 }

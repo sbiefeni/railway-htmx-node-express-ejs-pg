@@ -8,7 +8,11 @@ const app = express();
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "..", "views"));
 
-app.use(express.json());
+// Capture raw body on every request so the Voiceflow webhook route can
+// verify the Svix HMAC signature (which requires the original bytes).
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // --- Webhook ---

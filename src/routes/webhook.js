@@ -1,4 +1,5 @@
 const express = require("express");
+const { Webhook } = require("svix");
 const { pool } = require("../database");
 const callMap  = require("../callMap");
 
@@ -7,9 +8,39 @@ const router = express.Router();
 const CALL_TYPES    = new Set(["runtime.call.start", "runtime.call.end"]);
 const SESSION_TYPES = new Set(["runtime.session.start", "runtime.session.end"]);
 
+/**
+ * Svix signature verification middleware.
+ * Applied only to POST /webhook/voiceflow.
+ *
+ * If VOICEFLOW_WEBHOOK_SECRET is not set, logs a warning and passes through
+ * (allows local dev without the secret).
+ *
+ * Rejects with 401 if the signature is missing or invalid.
+ */
+function verifyVoiceflowSignature(req, res, next) {
+  const secret = process.env.VOICEFLOW_WEBHOOK_SECRET;
+
+  if (!secret) {
+    console.warn("[webhook] VOICEFLOW_WEBHOOK_SECRET not set — skipping signature verification");
+    return next();
+  }
+
+  const wh = new Webhook(secret);
+
+  try {
+    // wh.verify() needs the raw body (Buffer) and the svix headers.
+    // req.rawBody is populated by the verify callback in express.json() (see index.js).
+    wh.verify(req.rawBody, req.headers);
+    next();
+  } catch (err) {
+    console.warn(`[webhook] signature verification failed: ${err.message}`);
+    return res.status(401).json({ error: "invalid signature" });
+  }
+}
+
 // POST /webhook/voiceflow
 // Receives all Voiceflow session lifecycle events and routes them to the correct table.
-router.post("/voiceflow", async (req, res) => {
+router.post("/voiceflow", verifyVoiceflowSignature, async (req, res) => {
   const payload = req.body;
 
   const type         = payload?.type ?? null;
@@ -18,7 +49,6 @@ router.post("/voiceflow", async (req, res) => {
   const agent_number = payload?.data?.metadata?.agentNumber ?? null;
 
   console.log(`[webhook] received event: ${type} | caller: ${user_number} | agent: ${agent_number}`);
-  console.log(`[webhook] headers: ${JSON.stringify(req.headers, null, 2)}`); // TODO: remove after confirming signature header
 
   try {
     if (CALL_TYPES.has(type)) {
