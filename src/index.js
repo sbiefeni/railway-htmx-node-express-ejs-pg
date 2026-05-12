@@ -1,13 +1,18 @@
 const express = require("express");
 const path = require("path");
 const { pool, migrate } = require("./database");
+const webhookRouter = require("./routes/webhook");
 
 const app = express();
 
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "..", "views"));
 
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// --- Webhook ---
+app.use("/webhook", webhookRouter);
 
 // --- Routes ---
 

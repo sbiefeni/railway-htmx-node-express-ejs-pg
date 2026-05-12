@@ -9,11 +9,14 @@ const pool = new Pool({
 
 async function migrate() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS todos (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      completed BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    CREATE TABLE IF NOT EXISTS call_events (
+      id          SERIAL PRIMARY KEY,
+      type        TEXT NOT NULL,
+      call_sid    TEXT,
+      user_number TEXT,
+      agent_number TEXT,
+      raw_payload JSONB NOT NULL,
+      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 }
