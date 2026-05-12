@@ -266,6 +266,12 @@ Voiceflow computes an HMAC-SHA256 of the raw request body using the secret and s
 - `GET /webhook/callmap` — current in-memory call map (size + all live entries)
 - `GET /health` — confirms Postgres connectivity
 
+### Making test requests from PowerShell
+PowerShell's `curl` is an alias for `Invoke-WebRequest`, not real curl. Use this form:
+```powershell
+Invoke-WebRequest -Method POST -Uri "https://web-xs17-production.up.railway.app/webhook/voiceflow" -ContentType "application/json" -Body '{"type":"test"}'
+```
+
 ---
 
 ## Environment variables
