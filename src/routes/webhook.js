@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../database");
+const callMap  = require("../callMap");
 
 const router = express.Router();
 
@@ -17,9 +18,17 @@ router.post("/voiceflow", async (req, res) => {
   const agent_number = payload?.data?.metadata?.agentNumber ?? null;
 
   console.log(`[webhook] received event: ${type} | caller: ${user_number} | agent: ${agent_number}`);
+  console.log(`[webhook] headers: ${JSON.stringify(req.headers, null, 2)}`); // TODO: remove after confirming signature header
 
   try {
     if (CALL_TYPES.has(type)) {
+      // Update in-memory call map
+      if (type === "runtime.call.start" && user_number && agent_number) {
+        callMap.set(user_number, agent_number);
+      } else if (type === "runtime.call.end" && user_number) {
+        callMap.del(user_number);
+      }
+
       await pool.query(
         `INSERT INTO call_events (type, call_sid, user_number, agent_number, raw_payload)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -72,6 +81,11 @@ router.get("/events/sessions", async (req, res) => {
     console.error("[webhook] Failed to fetch session events:", err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /webhook/callmap — debug: show current in-memory call map
+router.get("/callmap", (req, res) => {
+  res.json({ size: callMap.size(), entries: callMap.snapshot() });
 });
 
 module.exports = router;
