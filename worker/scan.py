@@ -41,7 +41,28 @@ if not GALLERY_URL:
 if not ADMIN_TOKEN:
     sys.exit("ERROR: ADMIN_TOKEN env var is required")
 
+# Auto-detect http vs https — try as-given first, then swap protocol
+def _resolve_url(url):
+    for candidate in [url, url.replace("https://", "http://", 1).replace("http://", "https://", 1)]:
+        try:
+            r = requests.get(f"{candidate}/api.php", params={"action": "faces-data"},
+                             headers={"User-Agent": "Mozilla/5.0 (compatible; FaceScanner/1.0)"},
+                             timeout=10)
+            if r.status_code < 500:
+                log.info("Gallery reachable at %s", candidate)
+                return candidate
+        except Exception:
+            pass
+    sys.exit(f"ERROR: Could not reach gallery at {url} (tried http and https)")
+
+GALLERY_URL = _resolve_url(GALLERY_URL)
+
 HEADERS = {"X-Admin-Token": ADMIN_TOKEN, "Content-Type": "application/json"}
+
+GET_HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (compatible; FaceScanner/1.0)",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +71,8 @@ HEADERS = {"X-Admin-Token": ADMIN_TOKEN, "Content-Type": "application/json"}
 
 def api_get(action, **params):
     url = f"{GALLERY_URL}/api.php"
-    r = requests.get(url, params={"action": action, **params}, timeout=REQUEST_TIMEOUT)
+    r = requests.get(url, params={"action": action, **params},
+                     headers=GET_HEADERS, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
     return r.json()
 
@@ -68,7 +90,7 @@ def fetch_thumb_image(rel_path):
     url = f"{GALLERY_URL}/api.php"
     try:
         r = requests.get(url, params={"action": "thumb", "path": rel_path},
-                         timeout=REQUEST_TIMEOUT)
+                         headers=GET_HEADERS, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         img = Image.open(BytesIO(r.content)).convert("RGB")
         return img
