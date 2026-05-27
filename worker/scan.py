@@ -121,6 +121,20 @@ def api_post(action: str, payload: dict):
     return r.json()
 
 
+def check_stop() -> bool:
+    """Returns True if the UI has requested a stop via faces-stop.flag."""
+    try:
+        r = requests.get(
+            f"{GALLERY_URL}/api.php",
+            params={"action": "faces-stop-check"},
+            headers=GET_HEADERS,
+            timeout=10,
+        )
+        return r.json().get("stop", False)
+    except Exception:
+        return False  # if check fails, keep going
+
+
 def fetch_thumb_image(rel_path: str):
     """Return a PIL Image (RGB) for the given relative path, or None on error."""
     try:
@@ -278,6 +292,10 @@ def main():
 
             batch_faces   = []
             batch_scanned = []
+
+            if check_stop():
+                log.info("Stop requested by UI — exiting after current batch.")
+                break
 
     log.info(
         "Done. Scanned %d images, found %d faces, %d errors.",
