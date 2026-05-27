@@ -156,15 +156,12 @@ def main():
     except Exception as e:
         sys.exit(f"ERROR: Could not fetch file list: {e}")
 
-    # api.php?action=files may return a list directly or wrapped in a key
+    # api.php?action=files returns a list of {rel, name, folder, size, mtime}
     if isinstance(files_resp, list):
-        all_files = files_resp
+        all_files = [f["rel"] if isinstance(f, dict) else f for f in files_resp]
     elif isinstance(files_resp, dict):
-        # Try common wrapper keys
-        all_files = (files_resp.get("files")
-                     or files_resp.get("data")
-                     or files_resp.get("images")
-                     or [])
+        raw = (files_resp.get("files") or files_resp.get("data") or files_resp.get("images") or [])
+        all_files = [f["rel"] if isinstance(f, dict) else f for f in raw]
     else:
         all_files = []
 
