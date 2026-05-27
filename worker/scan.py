@@ -57,7 +57,12 @@ def _resolve_url(url):
 
 GALLERY_URL = _resolve_url(GALLERY_URL)
 
-HEADERS = {"X-Admin-Token": ADMIN_TOKEN, "Content-Type": "application/json"}
+HEADERS = {
+    "X-Admin-Token": ADMIN_TOKEN,
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (compatible; FaceScanner/1.0)",
+}
 
 GET_HEADERS = {
     "Accept": "application/json, text/plain, */*",
