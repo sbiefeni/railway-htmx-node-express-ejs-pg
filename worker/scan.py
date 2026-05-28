@@ -28,6 +28,7 @@ from io import BytesIO
 from PIL import Image
 import cv2
 from insightface.app import FaceAnalysis
+from sklearn.cluster import DBSCAN
 
 logging.basicConfig(
     level=logging.INFO,
@@ -209,10 +210,15 @@ def detect_faces(pil_image: Image.Image) -> list[dict]:
 def cluster_faces(existing_groups: list, threshold: float) -> list:
     """
     Fetch all embeddings from the gallery, cluster orphaned faces (those not
-    already in a group) using greedy centroid matching, and return the full
-    updated groups list (existing + new).
+    already in a group) using DBSCAN, and return the full updated groups list.
 
-    Uses numpy for distance calculations — processes ~6k faces in seconds.
+    DBSCAN parameters:
+      epsilon   = threshold (same UI knob, same intuition as before)
+      min_samples = 2  — a face must have at least one neighbour to form a cluster;
+                         lone outliers are marked as noise and excluded entirely.
+
+    Faces labelled as noise (label == -1) are silently dropped — they won't
+    appear in any group. This keeps the results clean.
     """
     log.info("Fetching faces data for clustering…")
     faces_data = api_get("faces-data")
@@ -223,7 +229,6 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
         return existing_groups
 
     log.info("Fetching embeddings (this may take a moment)…")
-    # embeddings-fetch can be large (~40 MB); use a longer timeout
     embeddings_data = api_get_auth("faces-embeddings-fetch", timeout=120)
 
     if not embeddings_data:
@@ -240,47 +245,30 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
         log.info("No orphaned faces to cluster — all faces already in groups.")
         return existing_groups
 
-    log.info(
-        "Clustering %d orphaned faces (threshold=%.2f)…", len(orphans), threshold
-    )
+    log.info("Clustering %d orphaned faces (DBSCAN epsilon=%.2f)…", len(orphans), threshold)
 
     ids        = [f["id"] for f in orphans]
     emb_matrix = np.array([embeddings_data[fid] for fid in ids], dtype=np.float32)
 
-    centroids   = []   # list of np.ndarray (512,)
-    cluster_ids = []   # list of lists of face IDs
+    db     = DBSCAN(eps=threshold, min_samples=2, metric="euclidean", n_jobs=-1).fit(emb_matrix)
+    labels = db.labels_   # -1 = noise (outlier), 0..N = cluster index
 
-    for i, fid in enumerate(ids):
-        emb = emb_matrix[i]
-
-        if centroids:
-            centroid_stack = np.stack(centroids)                    # K × 512
-            dists          = np.linalg.norm(centroid_stack - emb, axis=1)  # K distances
-            best_idx       = int(np.argmin(dists))
-            best_dist      = float(dists[best_idx])
-        else:
-            best_idx  = -1
-            best_dist = float("inf")
-
-        if best_idx >= 0 and best_dist < threshold:
-            cluster_ids[best_idx].append(fid)
-            n = len(cluster_ids[best_idx])
-            # Update running centroid mean and re-normalise (keep on unit sphere)
-            new_centroid = (centroids[best_idx] * (n - 1) + emb) / n
-            norm = np.linalg.norm(new_centroid)
-            centroids[best_idx] = new_centroid / norm if norm > 0 else new_centroid
-        else:
-            centroids.append(emb.copy())
-            cluster_ids.append([fid])
+    # Group face IDs by cluster label, ignoring noise
+    clusters: dict[int, list] = {}
+    for fid, label in zip(ids, labels):
+        if label == -1:
+            continue   # outlier — exclude from results
+        clusters.setdefault(label, []).append(fid)
 
     new_groups = [
         {"id": "g_" + uuid.uuid4().hex[:12], "name": "", "faceIds": fids}
-        for fids in cluster_ids
+        for fids in clusters.values()
     ]
 
+    noise_count = int(np.sum(labels == -1))
     log.info(
-        "Clustering complete: %d new group(s) from %d face(s).",
-        len(new_groups), len(orphans),
+        "Clustering complete: %d group(s) from %d face(s), %d noise/outlier face(s) excluded.",
+        len(new_groups), len(orphans) - noise_count, noise_count,
     )
     return existing_groups + new_groups
 
