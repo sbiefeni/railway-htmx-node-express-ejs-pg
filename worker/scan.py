@@ -28,7 +28,7 @@ from io import BytesIO
 from PIL import Image
 import cv2
 from insightface.app import FaceAnalysis
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import AgglomerativeClustering
 
 logging.basicConfig(
     level=logging.INFO,
@@ -209,16 +209,17 @@ def detect_faces(pil_image: Image.Image) -> list[dict]:
 
 def cluster_faces(existing_groups: list, threshold: float) -> list:
     """
-    Fetch all embeddings from the gallery, cluster orphaned faces (those not
-    already in a group) using DBSCAN, and return the full updated groups list.
+    Fetch all embeddings from the gallery, cluster orphaned faces using
+    Agglomerative Hierarchical Clustering with average linkage.
 
-    DBSCAN parameters:
-      epsilon   = threshold (same UI knob, same intuition as before)
-      min_samples = 2  — a face must have at least one neighbour to form a cluster;
-                         lone outliers are marked as noise and excluded entirely.
+    Why AHC with average linkage:
+      - Order-independent (unlike greedy centroid)
+      - No chaining effect (unlike DBSCAN) — merges clusters based on the
+        average distance between all points in two clusters, not nearest neighbor
+      - distance_threshold maps naturally to the UI threshold knob
+      - Singleton clusters (size == 1) are excluded as noise
 
-    Faces labelled as noise (label == -1) are silently dropped — they won't
-    appear in any group. This keeps the results clean.
+    Faces that end up alone in a cluster of 1 are silently dropped.
     """
     log.info("Fetching faces data for clustering…")
     faces_data = api_get("faces-data")
@@ -245,29 +246,34 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
         log.info("No orphaned faces to cluster — all faces already in groups.")
         return existing_groups
 
-    log.info("Clustering %d orphaned faces (DBSCAN epsilon=%.2f)…", len(orphans), threshold)
+    log.info("Clustering %d orphaned faces (AHC average linkage, threshold=%.2f)…", len(orphans), threshold)
 
     ids        = [f["id"] for f in orphans]
     emb_matrix = np.array([embeddings_data[fid] for fid in ids], dtype=np.float32)
 
-    db     = DBSCAN(eps=threshold, min_samples=2, metric="euclidean", n_jobs=-1).fit(emb_matrix)
-    labels = db.labels_   # -1 = noise (outlier), 0..N = cluster index
+    model  = AgglomerativeClustering(
+        n_clusters=None,
+        distance_threshold=threshold,
+        metric="euclidean",
+        linkage="average",
+    )
+    labels = model.fit_predict(emb_matrix)
 
-    # Group face IDs by cluster label, ignoring noise
+    # Group face IDs by cluster label
     clusters: dict[int, list] = {}
     for fid, label in zip(ids, labels):
-        if label == -1:
-            continue   # outlier — exclude from results
-        clusters.setdefault(label, []).append(fid)
+        clusters.setdefault(int(label), []).append(fid)
 
+    # Exclude singleton clusters (lone faces with no match = noise)
     new_groups = [
         {"id": "g_" + uuid.uuid4().hex[:12], "name": "", "faceIds": fids}
         for fids in clusters.values()
+        if len(fids) >= 2
     ]
 
-    noise_count = int(np.sum(labels == -1))
+    noise_count = sum(1 for fids in clusters.values() if len(fids) < 2)
     log.info(
-        "Clustering complete: %d group(s) from %d face(s), %d noise/outlier face(s) excluded.",
+        "Clustering complete: %d group(s) from %d face(s), %d singleton(s) excluded as noise.",
         len(new_groups), len(orphans) - noise_count, noise_count,
     )
     return existing_groups + new_groups
