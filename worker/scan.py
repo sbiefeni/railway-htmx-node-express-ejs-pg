@@ -191,7 +191,7 @@ def detect_faces(pil_image: Image.Image) -> list[dict]:
         x1, y1, x2, y2 = bbox
         results.append({
             "id":        "f_" + uuid.uuid4().hex[:12],
-            "embedding": face.embedding.tolist(),   # 512 floats
+            "embedding": face.normed_embedding.tolist(),   # 512 floats
             "rect": {
                 "x":      int(x1),
                 "y":      int(y1),
@@ -265,8 +265,10 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
         if best_idx >= 0 and best_dist < threshold:
             cluster_ids[best_idx].append(fid)
             n = len(cluster_ids[best_idx])
-            # Update running centroid mean
-            centroids[best_idx] = (centroids[best_idx] * (n - 1) + emb) / n
+            # Update running centroid mean and re-normalise (keep on unit sphere)
+            new_centroid = (centroids[best_idx] * (n - 1) + emb) / n
+            norm = np.linalg.norm(new_centroid)
+            centroids[best_idx] = new_centroid / norm if norm > 0 else new_centroid
         else:
             centroids.append(emb.copy())
             cluster_ids.append([fid])
