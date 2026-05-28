@@ -153,7 +153,7 @@ def fetch_thumb_image(rel_path: str):
     try:
         r = requests.get(
             f"{GALLERY_URL}/api.php",
-            params={"action": "thumb", "path": rel_path},
+            params={"action": "thumb", "path": rel_path, "size": "scan"},
             headers=GET_HEADERS,
             timeout=REQUEST_TIMEOUT,
         )
