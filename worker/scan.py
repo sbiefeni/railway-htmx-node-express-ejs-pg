@@ -398,7 +398,10 @@ def main():
 
     log.info("Starting clustering…")
     try:
-        all_groups = cluster_faces(existing_groups, threshold)
+        # In cluster-only mode, ignore existing groups so all faces are re-clustered
+        # from scratch. Named groups will be preserved in a future improvement.
+        groups_for_clustering = [] if cluster_only else existing_groups
+        all_groups = cluster_faces(groups_for_clustering, threshold)
         resp = api_post("faces-cluster-store", {"groups": all_groups}, timeout=60)
         log.info("Clustering stored — %d total group(s). Response: %s", len(all_groups), resp)
     except Exception as e:
