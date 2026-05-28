@@ -310,7 +310,7 @@ def main():
         # 2. Fetch full file list
         log.info("Fetching file list…")
         try:
-            files_resp = api_get("files")
+            files_resp = api_get("files", excludeTrash=1)
         except Exception as e:
             sys.exit(f"ERROR: Could not fetch file list: {e}")
 
