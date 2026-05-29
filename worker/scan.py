@@ -397,7 +397,11 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
     # Annotate new unnamed clusters with Potentially-<Name> suggestions where they
     # closely match an existing named group. faces_data is the source of truth
     # for named groups (it merges faces-named.json) and groupExclusions.
-    named_groups = [g for g in faces_data.get("groups", []) if g.get("name")]
+    # Named groups eligible as Potentially-<Name> anchors. System groups
+    # (Strangers / Ignore) are excluded — they're not real identities and would
+    # produce nonsense suggestions like "Potentially Strangers".
+    named_groups = [g for g in faces_data.get("groups", [])
+                    if g.get("name") and not g.get("system")]
     exclusions   = faces_data.get("groupExclusions", {}) or {}
     if isinstance(exclusions, list):
         exclusions = {}  # PHP may serialise empty assoc array as []
