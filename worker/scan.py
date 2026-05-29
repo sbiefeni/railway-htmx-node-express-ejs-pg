@@ -219,13 +219,18 @@ def detect_faces(pil_image: Image.Image) -> list[dict]:
 # the UI can render the cluster as "Potentially <Name>" next to that named
 # group. This is advisory only — admins still confirm by merging or renaming.
 #
-# Rule: pick the named group of size >= MIN_NAMED_SIZE whose top-K nearest
-# pairs (cluster face × named-group face, excluding faces that were previously
-# rejected from that group via bulk-remove) are ALL below the same euclidean
-# threshold used for clustering. Best-only: ranked by mean of those K pairs.
+# Rule: for each cluster face, find its nearest anchor face in the named group;
+# require >= CONSENSUS_FRAC of cluster faces to have NN distance below a stricter
+# MATCH_THRESHOLD. This avoids "Potentially X is everyone": a handful of lucky
+# low-distance pairs in a large cluster don't count — a meaningful fraction of
+# the cluster must agree. Excluded faces (recorded via bulk-remove on the named
+# group) are masked out of the cluster before computing.
+# Best-only: among qualifying named groups, pick the one with the lowest mean
+# NN-distance over the consenting cluster faces.
 
-SUGGESTION_MIN_NAMED_SIZE = 50
-SUGGESTION_TOP_K          = 3
+SUGGESTION_MIN_NAMED_SIZE  = 50
+SUGGESTION_MATCH_THRESHOLD = 1.10
+SUGGESTION_CONSENSUS_FRAC  = 0.25
 
 
 def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
@@ -241,7 +246,7 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
         if len(face_ids) < SUGGESTION_MIN_NAMED_SIZE:
             continue
         emb_rows = [embeddings_data[fid] for fid in face_ids if fid in embeddings_data]
-        if len(emb_rows) < SUGGESTION_TOP_K:
+        if not emb_rows:
             continue
         excl = set(exclusions.get(ng["id"], []) or [])
         candidates.append({
@@ -256,8 +261,12 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
                  SUGGESTION_MIN_NAMED_SIZE)
         return
 
-    log.info("Potentially-* matcher: %d eligible named group(s); scanning %d unnamed cluster(s)…",
-             len(candidates), len(new_groups))
+    log.info(
+        "Potentially-* matcher: %d eligible named group(s); scanning %d cluster(s) "
+        "(match_threshold=%.2f, consensus=%.0f%%)…",
+        len(candidates), len(new_groups),
+        SUGGESTION_MATCH_THRESHOLD, SUGGESTION_CONSENSUS_FRAC * 100,
+    )
 
     annotated = 0
     for g in new_groups:
@@ -269,8 +278,9 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
             continue
         kept_ids = [r[0] for r in rows]
         C_full   = np.array([r[1] for r in rows], dtype=np.float32)
+        n_total  = len(kept_ids)  # consensus denominator = full cluster size (pre-exclusion)
 
-        best = None  # (mean_topk, named_id, named_name)
+        best = None  # (mean_nn_below, named_id, named_name)
         for cand in candidates:
             # Mask out cluster faces previously excluded from this named group.
             if cand["excl"]:
@@ -282,18 +292,17 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
                 C = C_full
 
             # L2-normalised embeddings: ||c - n|| = sqrt(2 - 2 c·n).
-            dots = C @ cand["emb"].T                       # (|C|, |N|)
+            dots = C @ cand["emb"].T                          # (|C|, |N|)
             D    = np.sqrt(np.clip(2.0 - 2.0 * dots, 0.0, None))
-            flat = D.ravel()
-            if flat.size < SUGGESTION_TOP_K:
+            nn   = D.min(axis=1)                              # nearest anchor per cluster face
+            below = nn < SUGGESTION_MATCH_THRESHOLD
+            n_below = int(below.sum())
+            # Consensus: fraction of the ORIGINAL cluster (pre-exclusion) that strongly matches.
+            if n_below / n_total < SUGGESTION_CONSENSUS_FRAC:
                 continue
-            topk = np.partition(flat, SUGGESTION_TOP_K - 1)[:SUGGESTION_TOP_K]
-            topk.sort()
-            if topk[-1] >= threshold:
-                continue
-            mean_topk = float(topk.mean())
-            if best is None or mean_topk < best[0]:
-                best = (mean_topk, cand["id"], cand["name"])
+            mean_nn = float(nn[below].mean())
+            if best is None or mean_nn < best[0]:
+                best = (mean_nn, cand["id"], cand["name"])
 
         if best is not None:
             g["suggestedName"]    = best[2]
