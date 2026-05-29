@@ -516,9 +516,17 @@ def main():
 
     log.info("Starting clustering…")
     try:
-        # In cluster-only mode, ignore existing groups so all faces are re-clustered
-        # from scratch. Named groups will be preserved in a future improvement.
-        groups_for_clustering = [] if cluster_only else existing_groups
+        # In cluster-only mode, treat NAMED groups as fixed — keep their faces out
+        # of the orphan pool so they aren't re-clustered into duplicate "Potentially
+        # <Name>" clusters that mirror themselves. Unnamed groups are rebuilt.
+        # In full-scan mode, pass existing_groups (named + unnamed) so previously-
+        # assigned faces aren't re-clustered — only newly-scanned faces are.
+        if cluster_only:
+            groups_for_clustering = [g for g in existing_groups if g.get("name")]
+            log.info("Cluster-only mode: preserving %d named group(s); re-clustering everything else.",
+                     len(groups_for_clustering))
+        else:
+            groups_for_clustering = existing_groups
         all_groups = cluster_faces(groups_for_clustering, threshold)
         resp = api_post("faces-cluster-store", {"groups": all_groups}, timeout=60)
         log.info("Clustering stored — %d total group(s). Response: %s", len(all_groups), resp)
