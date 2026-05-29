@@ -234,8 +234,16 @@ SUGGESTION_CONSENSUS_FRAC  = 0.25
 
 
 def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
-                         embeddings_data: dict, threshold: float) -> None:
-    """Mutates new_groups in place, adding suggestedName/suggestedGroupId."""
+                         embeddings_data: dict, threshold: float,
+                         match_threshold: float = SUGGESTION_MATCH_THRESHOLD,
+                         consensus_frac: float = SUGGESTION_CONSENSUS_FRAC,
+                         min_named_size: int = SUGGESTION_MIN_NAMED_SIZE) -> None:
+    """Mutates new_groups in place, adding suggestedName/suggestedGroupId.
+
+    match_threshold, consensus_frac, min_named_size override the module
+    defaults so the worker can pick them up from faces.json.config without
+    a code push.
+    """
     # Prebuild eligible named-group embedding matrices.
     candidates = []
     for ng in named_groups:
@@ -243,7 +251,7 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
         if not name:
             continue
         face_ids = ng.get("faceIds", []) or []
-        if len(face_ids) < SUGGESTION_MIN_NAMED_SIZE:
+        if len(face_ids) < min_named_size:
             continue
         emb_rows = [embeddings_data[fid] for fid in face_ids if fid in embeddings_data]
         if not emb_rows:
@@ -258,14 +266,14 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
 
     if not candidates:
         log.info("Potentially-* matcher: no named groups with >= %d faces — nothing to suggest.",
-                 SUGGESTION_MIN_NAMED_SIZE)
+                 min_named_size)
         return
 
     log.info(
         "Potentially-* matcher: %d eligible named group(s); scanning %d cluster(s) "
-        "(match_threshold=%.2f, consensus=%.0f%%)…",
+        "(match_threshold=%.2f, consensus=%.0f%%, min_named_size=%d)…",
         len(candidates), len(new_groups),
-        SUGGESTION_MATCH_THRESHOLD, SUGGESTION_CONSENSUS_FRAC * 100,
+        match_threshold, consensus_frac * 100, min_named_size,
     )
 
     annotated = 0
@@ -295,10 +303,10 @@ def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
             dots = C @ cand["emb"].T                          # (|C|, |N|)
             D    = np.sqrt(np.clip(2.0 - 2.0 * dots, 0.0, None))
             nn   = D.min(axis=1)                              # nearest anchor per cluster face
-            below = nn < SUGGESTION_MATCH_THRESHOLD
+            below = nn < match_threshold
             n_below = int(below.sum())
             # Consensus: fraction of the ORIGINAL cluster (pre-exclusion) that strongly matches.
-            if n_below / n_total < SUGGESTION_CONSENSUS_FRAC:
+            if n_below / n_total < consensus_frac:
                 continue
             mean_nn = float(nn[below].mean())
             if best is None or mean_nn < best[0]:
@@ -393,8 +401,22 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
     exclusions   = faces_data.get("groupExclusions", {}) or {}
     if isinstance(exclusions, list):
         exclusions = {}  # PHP may serialise empty assoc array as []
+    # Matcher knobs come from faces.json.config when present (tunable from the
+    # UI's collapsible Tuning row), falling back to module defaults otherwise.
+    cfg = faces_data.get("config", {}) or {}
     try:
-        compute_suggestions(new_groups, named_groups, exclusions, embeddings_data, threshold)
+        match_threshold = float(cfg.get("matchThreshold", SUGGESTION_MATCH_THRESHOLD))
+        consensus_frac  = float(cfg.get("consensusFrac",  SUGGESTION_CONSENSUS_FRAC))
+        min_named_size  = int  (cfg.get("minNamedSize",   SUGGESTION_MIN_NAMED_SIZE))
+    except (TypeError, ValueError):
+        match_threshold = SUGGESTION_MATCH_THRESHOLD
+        consensus_frac  = SUGGESTION_CONSENSUS_FRAC
+        min_named_size  = SUGGESTION_MIN_NAMED_SIZE
+    try:
+        compute_suggestions(new_groups, named_groups, exclusions, embeddings_data, threshold,
+                            match_threshold=match_threshold,
+                            consensus_frac=consensus_frac,
+                            min_named_size=min_named_size)
     except Exception as e:
         log.warning("Potentially-* matcher failed (non-fatal): %s", e)
 
