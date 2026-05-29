@@ -19,6 +19,14 @@ Run: python scan.py
 """
 
 import os
+
+# Cap CPU threads before any ML libraries load — keeps usage within the 8 vCPU plan.
+# Increase or remove if you want faster scans at the cost of potential overage.
+_CPU_LIMIT = os.environ.get("CPU_THREAD_LIMIT", "8")
+os.environ.setdefault("OMP_NUM_THREADS",      _CPU_LIMIT)
+os.environ.setdefault("MKL_NUM_THREADS",      _CPU_LIMIT)
+os.environ.setdefault("OPENBLAS_NUM_THREADS", _CPU_LIMIT)
+
 import sys
 import uuid
 import logging
@@ -204,6 +212,98 @@ def detect_faces(pil_image: Image.Image) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Potentially-<Name> matcher
+# ---------------------------------------------------------------------------
+# For each new unnamed cluster, check if it looks like a near-match to any
+# existing NAMED group. If so, attach suggestedName/suggestedGroupId fields so
+# the UI can render the cluster as "Potentially <Name>" next to that named
+# group. This is advisory only — admins still confirm by merging or renaming.
+#
+# Rule: pick the named group of size >= MIN_NAMED_SIZE whose top-K nearest
+# pairs (cluster face × named-group face, excluding faces that were previously
+# rejected from that group via bulk-remove) are ALL below the same euclidean
+# threshold used for clustering. Best-only: ranked by mean of those K pairs.
+
+SUGGESTION_MIN_NAMED_SIZE = 50
+SUGGESTION_TOP_K          = 3
+
+
+def compute_suggestions(new_groups: list, named_groups: list, exclusions: dict,
+                         embeddings_data: dict, threshold: float) -> None:
+    """Mutates new_groups in place, adding suggestedName/suggestedGroupId."""
+    # Prebuild eligible named-group embedding matrices.
+    candidates = []
+    for ng in named_groups:
+        name = ng.get("name") or ""
+        if not name:
+            continue
+        face_ids = ng.get("faceIds", []) or []
+        if len(face_ids) < SUGGESTION_MIN_NAMED_SIZE:
+            continue
+        emb_rows = [embeddings_data[fid] for fid in face_ids if fid in embeddings_data]
+        if len(emb_rows) < SUGGESTION_TOP_K:
+            continue
+        excl = set(exclusions.get(ng["id"], []) or [])
+        candidates.append({
+            "id":   ng["id"],
+            "name": name,
+            "excl": excl,
+            "emb":  np.array(emb_rows, dtype=np.float32),
+        })
+
+    if not candidates:
+        log.info("Potentially-* matcher: no named groups with >= %d faces — nothing to suggest.",
+                 SUGGESTION_MIN_NAMED_SIZE)
+        return
+
+    log.info("Potentially-* matcher: %d eligible named group(s); scanning %d unnamed cluster(s)…",
+             len(candidates), len(new_groups))
+
+    annotated = 0
+    for g in new_groups:
+        if g.get("name"):
+            continue  # already named — nothing to suggest
+        cluster_ids = g.get("faceIds", []) or []
+        rows = [(fid, embeddings_data[fid]) for fid in cluster_ids if fid in embeddings_data]
+        if not rows:
+            continue
+        kept_ids = [r[0] for r in rows]
+        C_full   = np.array([r[1] for r in rows], dtype=np.float32)
+
+        best = None  # (mean_topk, named_id, named_name)
+        for cand in candidates:
+            # Mask out cluster faces previously excluded from this named group.
+            if cand["excl"]:
+                mask = np.array([fid not in cand["excl"] for fid in kept_ids], dtype=bool)
+                if not mask.any():
+                    continue
+                C = C_full[mask]
+            else:
+                C = C_full
+
+            # L2-normalised embeddings: ||c - n|| = sqrt(2 - 2 c·n).
+            dots = C @ cand["emb"].T                       # (|C|, |N|)
+            D    = np.sqrt(np.clip(2.0 - 2.0 * dots, 0.0, None))
+            flat = D.ravel()
+            if flat.size < SUGGESTION_TOP_K:
+                continue
+            topk = np.partition(flat, SUGGESTION_TOP_K - 1)[:SUGGESTION_TOP_K]
+            topk.sort()
+            if topk[-1] >= threshold:
+                continue
+            mean_topk = float(topk.mean())
+            if best is None or mean_topk < best[0]:
+                best = (mean_topk, cand["id"], cand["name"])
+
+        if best is not None:
+            g["suggestedName"]    = best[2]
+            g["suggestedGroupId"] = best[1]
+            annotated += 1
+
+    log.info("Potentially-* matcher: attached suggestions to %d unnamed group(s).", annotated)
+
+
+# ---------------------------------------------------------------------------
 # Clustering — greedy centroid, numpy-accelerated
 # ---------------------------------------------------------------------------
 
@@ -276,6 +376,19 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
         "Clustering complete: %d group(s) from %d face(s), %d singleton(s) excluded as noise.",
         len(new_groups), len(orphans) - noise_count, noise_count,
     )
+
+    # Annotate new unnamed clusters with Potentially-<Name> suggestions where they
+    # closely match an existing named group. faces_data is the source of truth
+    # for named groups (it merges faces-named.json) and groupExclusions.
+    named_groups = [g for g in faces_data.get("groups", []) if g.get("name")]
+    exclusions   = faces_data.get("groupExclusions", {}) or {}
+    if isinstance(exclusions, list):
+        exclusions = {}  # PHP may serialise empty assoc array as []
+    try:
+        compute_suggestions(new_groups, named_groups, exclusions, embeddings_data, threshold)
+    except Exception as e:
+        log.warning("Potentially-* matcher failed (non-fatal): %s", e)
+
     return existing_groups + new_groups
 
 
