@@ -432,6 +432,34 @@ def cluster_faces(existing_groups: list, threshold: float) -> list:
 # ---------------------------------------------------------------------------
 
 def main():
+    # 0. Preflight — verify ADMIN_TOKEN is a valid superadmin token BEFORE
+    #    doing any real work (model already loaded at import; this avoids
+    #    burning CPU on per-photo ArcFace inference + the embeddings fetch
+    #    only to 403 at the first auth-gated POST). Fails the deploy loud.
+    log.info("Verifying admin token (auth-ping)…")
+    try:
+        r = requests.get(
+            f"{GALLERY_URL}/api.php",
+            params={"action": "auth-ping"},
+            headers=HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
+    except Exception as e:
+        sys.exit(f"ERROR: auth-ping unreachable: {e}")
+    if r.status_code == 401 or r.status_code == 403:
+        sys.exit(
+            "ERROR: auth-ping rejected ADMIN_TOKEN (HTTP "
+            f"{r.status_code}). The Railway ADMIN_TOKEN env var is stale — "
+            "rotate it from Config → Personal → Admin token and redeploy."
+        )
+    if not r.ok:
+        sys.exit(f"ERROR: auth-ping HTTP {r.status_code}: {r.text[:200]}")
+    try:
+        who = r.json().get("username", "?")
+    except Exception:
+        who = "?"
+    log.info("auth-ping ok — superadmin '%s'", who)
+
     # 1. Fetch current faces.json state + config
     log.info("Fetching current faces data from gallery…")
     try:
