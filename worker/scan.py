@@ -1,5 +1,5 @@
 """
-Face scanning worker for the PHP photo gallery.
+Face scanning worker for the PHP photo gallery. em
 
 Uses InsightFace (ArcFace buffalo_l) — outputs 512-dim L2-normalised embeddings.
 Replaces the old face_recognition/dlib worker (128-dim).
