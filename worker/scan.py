@@ -447,10 +447,13 @@ def main():
     except Exception as e:
         sys.exit(f"ERROR: auth-ping unreachable: {e}")
     if r.status_code == 401 or r.status_code == 403:
+        body = (r.text or "").strip()[:300]
         sys.exit(
-            "ERROR: auth-ping rejected ADMIN_TOKEN (HTTP "
-            f"{r.status_code}). The Railway ADMIN_TOKEN env var is stale — "
-            "rotate it from Config → Personal → Admin token and redeploy."
+            f"ERROR: auth-ping rejected ADMIN_TOKEN (HTTP {r.status_code}). "
+            f"Server said: {body}\n"
+            "  'Not authorized'    → token matched no admin record (env var is stale or copied wrong)\n"
+            "  'Superadmin required' → token matched a sub-admin (copy your SUPERADMIN's token)\n"
+            "Rotate the Railway ADMIN_TOKEN env var via Config → Personal → Admin token and redeploy."
         )
     if not r.ok:
         sys.exit(f"ERROR: auth-ping HTTP {r.status_code}: {r.text[:200]}")
