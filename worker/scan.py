@@ -53,6 +53,16 @@ ADMIN_TOKEN     = os.environ.get("ADMIN_TOKEN", "")
 BATCH_SIZE      = int(os.environ.get("BATCH_SIZE", "10"))
 REQUEST_TIMEOUT = 30
 
+# Single-holder scan lease (X-3 / F-FW9). A unique id per container; Railway
+# redeploy overlap means two containers can briefly coexist — the second one
+# finds the lease held and aborts instead of double-writing faces.json.
+WORKER_ID = (
+    os.environ.get("RAILWAY_REPLICA_ID")
+    or os.environ.get("RAILWAY_DEPLOYMENT_ID")
+    or uuid.uuid4().hex[:12]
+)
+LEASE_TTL = int(os.environ.get("SCAN_LEASE_TTL", "300"))  # extended each batch
+
 if not GALLERY_URL:
     sys.exit("ERROR: GALLERY_URL env var is required")
 if not ADMIN_TOKEN:
@@ -142,6 +152,32 @@ def api_post(action: str, payload: dict, timeout: int = REQUEST_TIMEOUT):
     return r.json()
 
 
+def acquire_scan_lease(strict: bool) -> bool:
+    """Acquire (or extend — idempotent for the same WORKER_ID) the scan lease.
+
+    strict=True  → at scan start: a denial or API failure aborts the run.
+    strict=False → mid-scan extension: a transient API failure is tolerated
+                   (we already hold the lease; the TTL covers the gap).
+    Server side: faces-scan-lease-acquire (lib/faces-worker.php), which also
+    drives the 409 guard blocking panel mutations during the scan.
+    """
+    try:
+        resp = api_post(
+            "faces-scan-lease-acquire",
+            {"clientId": WORKER_ID, "ttl": LEASE_TTL},
+        )
+        if not resp.get("acquired"):
+            log.warning(
+                "Scan lease held by another worker (expiresAt=%s).",
+                resp.get("expiresAt"),
+            )
+            return False
+        return True
+    except Exception as e:
+        log.warning("Lease call failed: %s", e)
+        return not strict
+
+
 def check_stop() -> bool:
     """Returns True if the UI has requested a stop via faces-stop.flag."""
     try:
@@ -157,11 +193,17 @@ def check_stop() -> bool:
 
 
 def fetch_thumb_image(rel_path: str):
-    """Return a PIL Image (RGB) for the given relative path, or None on error."""
+    """Return a PIL Image (RGB) for the given relative path, or None on error.
+
+    Sends original=1 so the server bypasses the enhanced-version resolution.
+    Face rects + embeddings are computed against the ORIGINAL pixels — if a
+    user has selected an enhanced version of this photo, we still want to
+    scan the original so rect coords stay aligned with what's stored.
+    """
     try:
         r = requests.get(
             f"{GALLERY_URL}/api.php",
-            params={"action": "thumb", "path": rel_path, "size": "scan"},
+            params={"action": "thumb", "path": rel_path, "size": "scan", "original": 1},
             headers=GET_HEADERS,
             timeout=REQUEST_TIMEOUT,
         )
@@ -463,6 +505,14 @@ def main():
         who = "?"
     log.info("auth-ping ok — superadmin '%s'", who)
 
+    # 0b. Claim the single-holder scan lease (X-3 / F-FW9). A second
+    #     container from a redeploy overlap aborts here instead of
+    #     double-writing faces.json.
+    if not acquire_scan_lease(strict=True):
+        log.info("Another scanner holds the lease — aborting this container.")
+        return
+    log.info("Scan lease acquired (id=%s, ttl=%ds).", WORKER_ID, LEASE_TTL)
+
     # 1. Fetch current faces.json state + config
     log.info("Fetching current faces data from gallery…")
     try:
@@ -556,6 +606,8 @@ def main():
                 batch_faces   = []
                 batch_scanned = []
 
+                acquire_scan_lease(strict=False)   # extend lease TTL
+
                 if check_stop():
                     log.info("Stop requested by UI — skipping clustering.")
                     stopped = True
@@ -572,6 +624,7 @@ def main():
         return
 
     log.info("Starting clustering…")
+    acquire_scan_lease(strict=False)   # fresh TTL window for the cluster phase
     try:
         # In cluster-only mode, treat NAMED groups as fixed — keep their faces out
         # of the orphan pool so they aren't re-clustered into duplicate "Potentially
